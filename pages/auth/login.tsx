@@ -35,7 +35,6 @@ export default function Login(){
       return
     }
 
-    localStorage.setItem('token', data.token)
     localStorage.setItem('user', JSON.stringify(data.user))
     router.push('/dashboard')
   }

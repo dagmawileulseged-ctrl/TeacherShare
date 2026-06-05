@@ -1,13 +1,10 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import { Pool } from 'pg'
+import { createClient } from '@supabase/supabase-js'
 
-const dataDir = path.join(process.cwd(), 'data')
 const uploadDir = path.join(process.cwd(), 'public', 'uploads')
-const dbPath = path.join(dataDir, 'app.sqlite')
-
-let db: DatabaseSync | null = null
 
 export type SessionUser = {
   id: number
@@ -16,93 +13,123 @@ export type SessionUser = {
   institute: string
 }
 
-export function getDb() {
-  if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true })
-  if (!existsSync(uploadDir)) mkdirSync(uploadDir, { recursive: true })
+let pool: Pool | null = null
+let initialized = false
 
-  if (!db) {
-    db = new DatabaseSync(dbPath)
-    db.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA foreign_keys = ON;
-
-      CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        email TEXT NOT NULL UNIQUE,
-        institute TEXT NOT NULL,
-        password_hash TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS sessions (
-        token TEXT PRIMARY KEY,
-        user_id INTEGER NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS materials (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        institution TEXT NOT NULL,
-        course TEXT NOT NULL,
-        teacher_name TEXT NOT NULL,
-        file_name TEXT,
-        file_url TEXT,
-        file_type TEXT,
-        file_size INTEGER,
-        uploader_id INTEGER NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (uploader_id) REFERENCES users(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS topics (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        type TEXT NOT NULL DEFAULT 'material',
-        title TEXT NOT NULL,
-        body TEXT NOT NULL DEFAULT '',
-        course TEXT NOT NULL,
-        institution TEXT NOT NULL,
-        teacher_name TEXT NOT NULL,
-        school_year TEXT,
-        material_id INTEGER,
-        rating_id INTEGER,
-        author_id INTEGER NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE SET NULL,
-        FOREIGN KEY (rating_id) REFERENCES ratings(id) ON DELETE SET NULL,
-        FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS ratings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        teacher_name TEXT NOT NULL,
-        institution TEXT NOT NULL,
-        course TEXT NOT NULL,
-        school_year TEXT,
-        score INTEGER NOT NULL CHECK(score BETWEEN 1 AND 5),
-        comment TEXT NOT NULL DEFAULT '',
-        user_id INTEGER NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      );
-    `)
-
-    migrateColumn(db, 'topics', 'type', "TEXT NOT NULL DEFAULT 'material'")
-    migrateColumn(db, 'topics', 'school_year', 'TEXT')
-    migrateColumn(db, 'topics', 'rating_id', 'INTEGER')
-    migrateColumn(db, 'ratings', 'school_year', 'TEXT')
+export function getPool() {
+  if (!pool) {
+    const connectionString = process.env.DATABASE_URL
+    pool = new Pool({
+      connectionString,
+      ssl: connectionString?.includes('supabase') || connectionString?.includes('neon.tech')
+        ? { rejectUnauthorized: false }
+        : false,
+    })
   }
+  return pool
+}
 
+export async function initDb() {
+  if (initialized) return pool
+  const db = getPool()
+
+  // Ensure tables exist
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL UNIQUE,
+      institute VARCHAR(255) NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token VARCHAR(255) PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS materials (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      institution VARCHAR(255) NOT NULL,
+      course VARCHAR(255) NOT NULL,
+      teacher_name VARCHAR(255) NOT NULL,
+      file_name VARCHAR(255),
+      file_url TEXT,
+      file_type VARCHAR(100),
+      file_size INTEGER,
+      uploader_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS ratings (
+      id SERIAL PRIMARY KEY,
+      teacher_name VARCHAR(255) NOT NULL,
+      institution VARCHAR(255) NOT NULL,
+      course VARCHAR(255) NOT NULL,
+      school_year VARCHAR(50),
+      score INTEGER NOT NULL CHECK (score BETWEEN 1 AND 5),
+      comment TEXT NOT NULL DEFAULT '',
+      is_anonymous BOOLEAN NOT NULL DEFAULT TRUE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS topics (
+      id SERIAL PRIMARY KEY,
+      type VARCHAR(50) NOT NULL DEFAULT 'material',
+      title VARCHAR(255) NOT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      course VARCHAR(255) NOT NULL,
+      institution VARCHAR(255) NOT NULL,
+      teacher_name VARCHAR(255) NOT NULL,
+      school_year VARCHAR(50),
+      material_id INTEGER REFERENCES materials(id) ON DELETE SET NULL,
+      rating_id INTEGER REFERENCES ratings(id) ON DELETE SET NULL,
+      author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS comments (
+      id SERIAL PRIMARY KEY,
+      topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+      author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
+
+  // Run dynamic migrations if any column is missing
+  await db.query(`ALTER TABLE topics ADD COLUMN IF NOT EXISTS type VARCHAR(50) NOT NULL DEFAULT 'material'`)
+  await db.query(`ALTER TABLE topics ADD COLUMN IF NOT EXISTS school_year VARCHAR(50)`)
+  await db.query(`ALTER TABLE topics ADD COLUMN IF NOT EXISTS rating_id INTEGER REFERENCES ratings(id) ON DELETE SET NULL`)
+  await db.query(`ALTER TABLE ratings ADD COLUMN IF NOT EXISTS school_year VARCHAR(50)`)
+  await db.query(`ALTER TABLE ratings ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN NOT NULL DEFAULT TRUE`)
+
+  // Setup indexes for search optimization
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_materials_teacher_name ON materials (LOWER(teacher_name))`)
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_materials_institution ON materials (LOWER(institution))`)
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ratings_teacher_name ON ratings (LOWER(teacher_name))`)
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ratings_institution ON ratings (LOWER(institution))`)
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_topics_institution ON topics (LOWER(institution))`)
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_comments_topic_id ON comments (topic_id)`)
+
+  // GIN indexes for Full-Text Search (FTS)
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_materials_fts ON materials USING gin (to_tsvector('english', coalesce(title, '') || ' ' || coalesce(course, '') || ' ' || coalesce(institution, '') || ' ' || coalesce(teacher_name, '')))`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_materials_teacher_fts ON materials USING gin (to_tsvector('english', coalesce(teacher_name, '') || ' ' || coalesce(institution, '') || ' ' || coalesce(course, '')))`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ratings_teacher_fts ON ratings USING gin (to_tsvector('english', coalesce(teacher_name, '') || ' ' || coalesce(institution, '') || ' ' || coalesce(course, '')))`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_topics_fts ON topics USING gin (to_tsvector('english', coalesce(title, '') || ' ' || coalesce(body, '') || ' ' || coalesce(course, '') || ' ' || coalesce(institution, '') || ' ' || coalesce(teacher_name, '')))`);
+
+  initialized = true
   return db
 }
 
-function migrateColumn(database: DatabaseSync, table: string, column: string, definition: string) {
-  const columns = database.prepare(`PRAGMA table_info(${table})`).all()
-  if (!columns.some((item) => item.name === column)) {
-    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
-  }
+// Backward compatibility helper
+export async function getDb() {
+  await initDb()
+  return getPool()
 }
 
 export function hashPassword(password: string) {
@@ -120,34 +147,37 @@ export function verifyPassword(password: string, storedHash: string) {
   return expected.length === actual.length && timingSafeEqual(expected, actual)
 }
 
-export function createSession(userId: number) {
+export async function createSession(userId: number) {
   const token = randomBytes(32).toString('hex')
-  getDb().prepare('INSERT INTO sessions (token, user_id) VALUES (?, ?)').run(token, userId)
+  const db = await getDb()
+  await db.query('INSERT INTO sessions (token, user_id) VALUES ($1, $2)', [token, userId])
   return token
 }
 
-export function getUserFromToken(token?: string): SessionUser | null {
+export async function getUserFromToken(token?: string): Promise<SessionUser | null> {
   if (!token) return null
 
-  const user = getDb()
-    .prepare(`
-      SELECT users.id, users.name, users.email, users.institute
-      FROM sessions
-      JOIN users ON users.id = sessions.user_id
-      WHERE sessions.token = ?
-    `)
-    .get(token) as SessionUser | undefined
+  const db = await getDb()
+  const res = await db.query<SessionUser>(`
+    SELECT users.id, users.name, users.email, users.institute
+    FROM sessions
+    JOIN users ON users.id = sessions.user_id
+    WHERE sessions.token = $1
+  `, [token])
 
-  return user ?? null
+  return res.rows[0] ?? null
 }
 
-export function getBearerUser(req: { headers: { authorization?: string } }) {
-  const token = req.headers.authorization?.replace(/^Bearer\s+/i, '')
+export async function getBearerUser(req: { headers: { authorization?: string }; cookies?: Partial<{ [key: string]: string }> }) {
+  let token = req.cookies?.token
+  if (!token && req.headers.authorization) {
+    token = req.headers.authorization.replace(/^Bearer\s+/i, '')
+  }
   return getUserFromToken(token)
 }
 
-export function requireUser(req: { headers: { authorization?: string } }) {
-  const user = getBearerUser(req)
+export async function requireUser(req: { headers: { authorization?: string }; cookies?: Partial<{ [key: string]: string }> }) {
+  const user = await getBearerUser(req)
   if (!user) {
     const error = new Error('Unauthorized')
     error.name = 'Unauthorized'
@@ -156,7 +186,7 @@ export function requireUser(req: { headers: { authorization?: string } }) {
   return user
 }
 
-export function saveUpload(file: { name: string; type: string; dataUrl: string }) {
+export async function saveUpload(file: { name: string; type: string; dataUrl: string }) {
   const match = file.dataUrl.match(/^data:(.+);base64,(.+)$/)
   if (!match) throw new Error('Invalid file payload')
 
@@ -165,6 +195,51 @@ export function saveUpload(file: { name: string; type: string; dataUrl: string }
   const storedName = `${Date.now()}-${randomBytes(6).toString('hex')}-${safeBase}${ext}`
   const bytes = Buffer.from(match[2], 'base64')
 
+  const supabaseUrl = process.env.SUPABASE_URL
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY
+  const bucketName = process.env.SUPABASE_BUCKET_NAME || 'materials'
+
+  const isProd = process.env.NODE_ENV === 'production'
+
+  if (supabaseUrl && supabaseAnonKey) {
+    try {
+      const supabase = createClient(supabaseUrl, supabaseAnonKey)
+      const { data, error } = await supabase.storage
+        .from(bucketName)
+        .upload(storedName, bytes, {
+          contentType: file.type,
+          duplex: 'half'
+        })
+
+      if (error) {
+        console.error('Supabase upload error:', error)
+        if (isProd) {
+          throw new Error(`File upload failed in production: ${error.message}`)
+        }
+      } else {
+        const { data: urlData } = supabase.storage
+          .from(bucketName)
+          .getPublicUrl(storedName)
+
+        return {
+          fileName: file.name,
+          fileUrl: urlData.publicUrl,
+          fileType: file.type,
+          fileSize: bytes.length,
+        }
+      }
+    } catch (err: any) {
+      console.error('Supabase upload catch error:', err)
+      if (isProd) {
+        throw new Error(err.message || 'File upload failed to reach Supabase storage')
+      }
+    }
+  } else if (isProd) {
+    throw new Error('Supabase storage environment variables (SUPABASE_URL and SUPABASE_ANON_KEY) are not configured in production. Enforced to prevent ephemeral local file loss.')
+  }
+
+  // Fallback to local (only allowed in development)
+  if (!existsSync(uploadDir)) mkdirSync(uploadDir, { recursive: true })
   writeFileSync(path.join(uploadDir, storedName), bytes)
 
   return {

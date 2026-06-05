@@ -3,7 +3,8 @@ import { useRouter } from 'next/router'
 import { useEffect, useState } from 'react'
 
 export default function TeacherProfile(){
-  const { query } = useRouter()
+  const router = useRouter()
+  const { query } = router
   const id = query.id as string | undefined
   const teacherName = id ? decodeURIComponent(id) : ''
   const [teacher, setTeacher] = useState<any>(null)
@@ -14,6 +15,7 @@ export default function TeacherProfile(){
   const [course, setCourse] = useState('')
   const [schoolYear, setSchoolYear] = useState('')
   const [comment, setComment] = useState('')
+  const [isAnonymous, setIsAnonymous] = useState(true)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
@@ -38,9 +40,10 @@ export default function TeacherProfile(){
     setError('')
     setMessage('')
 
-    const token = localStorage.getItem('token')
-    if (!token) {
+    const user = localStorage.getItem('user')
+    if (!user) {
       setError('Please log in before rating a teacher.')
+      router.push('/auth/login')
       return
     }
 
@@ -48,13 +51,18 @@ export default function TeacherProfile(){
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ teacher: teacherName, institution, course, schoolYear, score, comment }),
+      body: JSON.stringify({ teacher: teacherName, institution, course, schoolYear, score, comment, isAnonymous }),
     })
     const data = await response.json()
 
     if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem('user')
+        setError('Session expired. Please log in again.')
+        router.push('/auth/login')
+        return
+      }
       setError(data.error || 'Could not save rating')
       return
     }
@@ -72,9 +80,19 @@ export default function TeacherProfile(){
       <div className="border-4 border-[#06231f] bg-[#f2fbf3] p-6 shadow-[8px_8px_0_#06231f]">
         <p className="text-xs font-black uppercase tracking-wide text-[#0d5b50]">Teacher profile</p>
         <h2 className="display-ink mt-2 text-4xl font-black leading-none text-[#06231f]">{teacherName}</h2>
-        <p className="mt-3 font-semibold text-[#557169]">
-          Rating: <span className="font-black text-[#06231f]">{teacher?.rating || 0}</span> from {teacher?.rating_count || 0} ratings
-        </p>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
+          <p className="font-semibold text-[#557169]">
+            Rating: <span className="font-black text-[#06231f]">{teacher?.rating || 0}</span> from {teacher?.rating_count || 0} ratings
+          </p>
+          {teacher?.institutions && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-black uppercase tracking-wide text-[#0d5b50]">Lectures at:</span>
+              {String(teacher.institutions).split(',').filter(Boolean).map((inst: string) => (
+                <span key={inst} className="rounded-full bg-[#06231f] px-2.5 py-0.5 text-xs font-black text-white">{inst.trim()}</span>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
@@ -105,6 +123,18 @@ export default function TeacherProfile(){
             <div>
               <label className="block text-sm font-black text-[#06231f]">Comment</label>
               <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={4} className="mt-2 w-full border-2 border-[#06231f] bg-[#fbfff9] px-4 py-3 font-semibold outline-none" />
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <input 
+                type="checkbox" 
+                id="isAnonymous" 
+                checked={isAnonymous} 
+                onChange={(e) => setIsAnonymous(e.target.checked)} 
+                className="h-5 w-5 border-2 border-[#06231f] rounded-none bg-white text-[#06231f] focus:ring-0 accent-[#06231f] cursor-pointer"
+              />
+              <label htmlFor="isAnonymous" className="text-sm font-black text-[#06231f] cursor-pointer select-none">
+                Post rating anonymously
+              </label>
             </div>
             <button className="w-full border-2 border-[#06231f] bg-[#06231f] px-5 py-3 text-sm font-black uppercase text-white hover:bg-[#f7f1bd] hover:text-[#06231f]">
               Save Rating

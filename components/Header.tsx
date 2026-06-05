@@ -11,8 +11,7 @@ export default function Header(){
   useEffect(() => {
     function syncUser(){
       const storedUser = localStorage.getItem('user')
-      const token = localStorage.getItem('token')
-      if (storedUser && token) {
+      if (storedUser) {
         setIsAuth(true)
         setUser(JSON.parse(storedUser))
       } else {
@@ -33,11 +32,51 @@ export default function Header(){
     }
   }, [router.events])
 
-  function handleLogout(){
+  useEffect(() => {
+    let lastChecked = 0
+    const CHECK_INTERVAL = 60 * 1000 // 1 minute throttle
+
+    async function checkSession() {
+      const storedUser = localStorage.getItem('user')
+      if (!storedUser) return
+
+      const now = Date.now()
+      if (now - lastChecked < CHECK_INTERVAL) return
+      lastChecked = now
+
+      try {
+        const res = await fetch('/api/auth/me')
+        if (res.status === 401) {
+          localStorage.removeItem('user')
+          localStorage.removeItem('token')
+          window.dispatchEvent(new Event('storage'))
+          
+          const protectedRoutes = ['/dashboard', '/topics/create']
+          if (protectedRoutes.includes(router.pathname)) {
+            router.push('/auth/login')
+          }
+        }
+      } catch (err) {
+        // network/server error, ignore to avoid false logouts
+      }
+    }
+
+    checkSession()
+    window.addEventListener('focus', checkSession)
+    router.events.on('routeChangeComplete', checkSession)
+
+    return () => {
+      window.removeEventListener('focus', checkSession)
+      router.events.off('routeChangeComplete', checkSession)
+    }
+  }, [router.pathname, router.events])
+
+  async function handleLogout(){
     localStorage.removeItem('user')
     localStorage.removeItem('token')
     setIsAuth(false)
     setUser(null)
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
     router.push('/')
   }
 
@@ -61,13 +100,14 @@ export default function Header(){
           {isAuth ? (
             <>
               <Link href="/dashboard" className="px-3 py-2 transition hover:bg-[#0a332e] hover:text-white">Dashboard</Link>
+              <Link href="/browse" className="px-3 py-2 transition hover:bg-[#0a332e] hover:text-white">Browse</Link>
               <Link href="/topics/create" className="px-3 py-2 transition hover:bg-[#0a332e] hover:text-white">Upload</Link>
               <span className="hidden px-3 py-2 text-[#bdd5ca] md:inline">Hi, {user?.name || 'User'}</span>
               <button onClick={handleLogout} className="border-2 border-[#edf7e7] bg-transparent px-3 py-1.5 text-sm text-[#edf7e7] transition hover:bg-[#edf7e7] hover:text-[#06231f]">Logout</button>
             </>
           ) : (
             <>
-              <Link href="/#search" className="hidden px-3 py-2 transition hover:bg-[#0a332e] hover:text-white sm:inline">Materials</Link>
+              <Link href="/browse" className="px-3 py-2 transition hover:bg-[#0a332e] hover:text-white">Browse</Link>
               <Link href="/#colleges" className="hidden px-3 py-2 transition hover:bg-[#0a332e] hover:text-white md:inline">Colleges</Link>
               <Link href="/#teachers" className="hidden px-3 py-2 transition hover:bg-[#0a332e] hover:text-white md:inline">Teachers</Link>
               <Link href="/#about" className="hidden px-3 py-2 transition hover:bg-[#0a332e] hover:text-white lg:inline">How it works</Link>

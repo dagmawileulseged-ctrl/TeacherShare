@@ -9,9 +9,8 @@ export default function CreateTopic(){
   const [isAuth, setIsAuth] = useState(false)
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (!token) {
-      localStorage.removeItem('user')
+    const user = localStorage.getItem('user')
+    if (!user) {
       router.push('/auth/login')
     } else {
       setIsAuth(true)

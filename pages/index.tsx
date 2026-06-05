@@ -1,83 +1,47 @@
 import Link from 'next/link'
+import { useRouter } from 'next/router'
 import { useEffect, useState } from 'react'
 import UniversityLogos from '../components/UniversityLogos'
 
-const materials = [
-  ['Data Structures Midterm Pack', 'Dr. Bekele', 'AAU', '428 downloads'],
-  ['Accounting I Chapter Notes', "Ms. Hana", "St. Mary's", '311 downloads'],
-  ['Software Engineering Slides', 'Mr. Dawit', 'ASTU', '287 downloads'],
-]
 
-const teachers = [
-  ['Dr. Bekele Tadesse', ['AAU', 'ASTU', 'Unity'], '4.7', '42 ratings'],
-  ['Ms. Hana Alemu', ['SMU', 'Admas'], '4.6', '31 ratings'],
-  ['Mr. Dawit Tesfaye', ['ASTU', 'HiLCoE'], '4.5', '27 ratings'],
-]
 
 export default function Home(){
+  const router = useRouter()
   const [isAuth, setIsAuth] = useState(false)
+  const [user, setUser] = useState<any>(null)
   const [query, setQuery] = useState('')
   const [dbMaterials, setDbMaterials] = useState<any[]>([])
   const [dbTeachers, setDbTeachers] = useState<any[]>([])
+  const [dbRatings, setDbRatings] = useState<any[]>([])
+  const [activeTab, setActiveTab] = useState<'materials' | 'ratings'>('materials')
 
   useEffect(() => {
-    const user = localStorage.getItem('user')
-    const token = localStorage.getItem('token')
-    setIsAuth(!!user && !!token)
+    const storedUser = localStorage.getItem('user')
+    setIsAuth(!!storedUser)
+    if (storedUser) {
+      setUser(JSON.parse(storedUser))
+    }
+
     Promise.all([
-      fetch('/api/materials').then((res) => res.json()),
-      fetch('/api/teachers').then((res) => res.json()),
-    ]).then(([materialsData, teachersData]) => {
+      fetch('/api/materials?limit=6').then((res) => res.json()),
+      fetch('/api/teachers?limit=6').then((res) => res.json()),
+      fetch('/api/ratings?limit=6').then((res) => res.json()),
+    ]).then(([materialsData, teachersData, ratingsData]) => {
       setDbMaterials(materialsData.materials || [])
       setDbTeachers(teachersData.teachers || [])
+      setDbRatings(ratingsData.ratings || [])
     }).catch(() => {
       setDbMaterials([])
       setDbTeachers([])
+      setDbRatings([])
     })
   }, [])
 
   function handleSearch(e: React.FormEvent){
     e.preventDefault()
-  }
-
-  const materialRows = dbMaterials.length
-    ? dbMaterials.slice(0, 6).map((material) => ({
-      id: material.topic_id || material.id,
-      title: material.title,
-      teacher: material.teacher_name,
-      college: material.institution,
-      action: material.file_url ? 'Download' : 'Topic',
-    }))
-    : materials.map(([title, teacher, college, action]) => ({ id: null, title, teacher, college, action }))
-
-  const teacherRows = dbTeachers.length
-    ? dbTeachers.slice(0, 6).map((teacher) => ({
-      name: teacher.name,
-      colleges: String(teacher.institutions || '').split(',').filter(Boolean).slice(0, 3),
-      rating: Number(teacher.rating || 0) ? teacher.rating : 'New',
-      count: `${teacher.rating_count || 0} ratings`,
-    }))
-    : teachers.map(([name, colleges, rating, count]) => ({ name, colleges, rating, count }))
-
-  if (isAuth) {
-    return (
-      <div className="rounded-none border-4 border-[#06231f] bg-[#f2fbf3] p-6 shadow-[8px_8px_0_#06231f]">
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="display-ink text-3xl font-black text-[#06231f]">Recent Materials</h2>
-          <Link href="/topics/create" className="border-2 border-[#06231f] bg-[#06231f] px-4 py-2 text-sm font-black text-white transition hover:bg-[#f7f1bd] hover:text-[#06231f]">Upload Material</Link>
-        </div>
-        <ul className="space-y-4">
-          {dbMaterials.length ? dbMaterials.slice(0, 6).map((material) => (
-            <li key={material.id} className="border-2 border-[#06231f]/20 bg-white p-4">
-              <Link href={`/topics/${material.topic_id || material.id}`} className="font-black text-[#06231f] hover:text-[#0d5b50]">{material.title}</Link>
-              <p className="mt-1 text-sm font-semibold text-[#557169]">{material.course} - {material.teacher_name} - {material.institution}</p>
-            </li>
-          )) : (
-            <li className="border-2 border-[#06231f]/20 bg-white p-4">No materials yet - upload one to get started.</li>
-          )}
-        </ul>
-      </div>
-    )
+    if (query.trim()) {
+      router.push(`/search?q=${encodeURIComponent(query.trim())}`)
+    }
   }
 
   return (
@@ -88,13 +52,15 @@ export default function Home(){
         <div className="pointer-events-none absolute -right-16 bottom-0 h-56 w-56 rounded-t-full bg-[#24584f]/30" />
         <div className="relative mx-auto max-w-5xl text-center">
           <div className="mx-auto mb-5 inline-flex border-2 border-[#06231f] bg-[#fffef1] px-3 py-1 text-xs font-black uppercase tracking-wide text-[#06231f]">
-            Search materials and teacher ratings
+            {isAuth ? `Welcome back, ${user?.name || 'Student'}!` : 'Search materials and teacher ratings'}
           </div>
           <h1 className="display-ink mx-auto max-w-4xl text-5xl font-black leading-[0.9] text-[#06231f] sm:text-7xl">
             Find courses & rate lecturers in Addis
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-base font-semibold leading-7 text-[#24443d]">
-            Part-time teachers work across AAU, ASTU, Unity, HiLCoE, SMU, ACT, BITS, and more. Search once and see materials, ratings, and colleges together.
+            {isAuth
+              ? 'Browse student uploads, find lecture ratings, and search across AAU, ASTU, Unity, HiLCoE, SMU, ACT, BITS, and more.'
+              : 'Part-time teachers work across AAU, ASTU, Unity, HiLCoE, SMU, ACT, BITS, and more. Search once and see materials, ratings, and colleges together.'}
           </p>
 
           <form id="search" onSubmit={handleSearch} className="ink-panel mx-auto mt-8 max-w-3xl bg-white p-3">
@@ -111,9 +77,9 @@ export default function Home(){
             </div>
             <div className="mt-3 flex flex-wrap gap-2 text-xs font-black text-[#0d5b50]">
               {['Data Structures', 'Dr. Bekele', 'AAU', 'Software Engineering'].map((term) => (
-                <a key={term} href="#search" className="border-2 border-[#06231f]/20 bg-[#e3f4df] px-3 py-1.5 hover:border-[#06231f]">
+                <button key={term} type="button" onClick={() => { router.push(`/search?q=${encodeURIComponent(term)}`) }} className="border-2 border-[#06231f]/20 bg-[#e3f4df] px-3 py-1.5 hover:border-[#06231f] cursor-pointer">
                   {term}
-                </a>
+                </button>
               ))}
             </div>
           </form>
@@ -134,6 +100,108 @@ export default function Home(){
       </section>
 
       <UniversityLogos />
+
+      {isAuth && (
+        <section className="relative border-x-4 border-[#06231f] bg-[#f2fbf3] px-5 py-12 sm:px-8">
+          <div className="mx-auto max-w-5xl">
+            <div className="ink-panel bg-white p-6 sm:p-8">
+              <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-wide text-[#0d5b50]">Community Activity</p>
+                  <h2 className="display-ink text-3xl font-black text-[#06231f]">Latest Uploads &amp; Ratings</h2>
+                  <p className="mt-1 text-sm font-semibold text-[#557169]">See what other students have shared recently.</p>
+                </div>
+                <div className="flex border-2 border-[#06231f] bg-[#edf7f2] p-1 h-fit">
+                  <button 
+                    onClick={() => setActiveTab('materials')} 
+                    className={`px-4 py-2 text-xs font-black uppercase transition-all ${activeTab === 'materials' ? 'bg-[#06231f] text-white' : 'text-[#06231f] hover:bg-[#cce8c8]'}`}
+                  >
+                    Latest Uploads
+                  </button>
+                  <button 
+                    onClick={() => setActiveTab('ratings')} 
+                    className={`px-4 py-2 text-xs font-black uppercase transition-all ${activeTab === 'ratings' ? 'bg-[#06231f] text-white' : 'text-[#06231f] hover:bg-[#cce8c8]'}`}
+                  >
+                    Latest Ratings
+                  </button>
+                </div>
+              </div>
+
+              {activeTab === 'materials' ? (
+                <div className="space-y-4">
+                  {dbMaterials.length > 0 ? (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {dbMaterials.slice(0, 6).map((material) => (
+                        <div key={material.id} className="border-2 border-[#06231f] bg-white p-4 shadow-[4px_4px_0_#06231f] flex flex-col justify-between">
+                          <div>
+                            <p className="text-xs font-black uppercase tracking-wide text-[#0d5b50]">
+                              {material.course} - {material.institution}
+                            </p>
+                            <h4 className="mt-1 font-black text-[#06231f] hover:text-[#0d5b50]">
+                              <Link href={`/topics/${material.topic_id || material.id}`}>{material.title}</Link>
+                            </h4>
+                            <p className="mt-2 text-xs font-semibold text-[#557169]">
+                              Lecturer: <Link href={`/teachers/${encodeURIComponent(material.teacher_name)}`} className="font-black text-[#0d5b50] hover:text-[#06231f]">{material.teacher_name}</Link>
+                            </p>
+                          </div>
+                          <div className="mt-3 flex items-center justify-between border-t border-[#06231f]/10 pt-2.5 text-xs text-[#557169]">
+                            <span>By {material.uploader_name || 'Student'}</span>
+                            {material.file_url ? (
+                              <a href={material.file_url} download className="font-black text-[#0d5b50] hover:text-[#06231f]">Download</a>
+                            ) : (
+                              <Link href={`/topics/${material.topic_id || material.id}`} className="font-black text-[#0d5b50] hover:text-[#06231f]">View</Link>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="font-semibold text-[#557169] text-center py-6">No uploads from other users yet.</p>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {dbRatings.length > 0 ? (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {dbRatings.slice(0, 6).map((rating) => (
+                        <div key={rating.id} className="border-2 border-[#06231f] bg-[#fffef1] p-4 shadow-[4px_4px_0_#06231f] flex flex-col justify-between">
+                          <div>
+                            <div className="flex justify-between items-start gap-2">
+                              <p className="text-xs font-black uppercase tracking-wide text-[#0d5b50] truncate">
+                                {rating.course} - {rating.institution}
+                              </p>
+                              <div className="bg-[#06231f] text-white px-2 py-0.5 text-xs font-black shrink-0">
+                                {rating.score}/5
+                              </div>
+                            </div>
+                            <h4 className="mt-1 font-black text-[#06231f]">
+                              Rated:{' '}
+                              <Link href={`/teachers/${encodeURIComponent(rating.teacher_name)}`} className="hover:text-[#0d5b50]">
+                                {rating.teacher_name}
+                              </Link>
+                            </h4>
+                            {rating.comment && (
+                              <p className="mt-2 bg-white border border-[#06231f]/10 p-2.5 text-xs font-semibold italic text-[#39564f] line-clamp-3">
+                                &quot;{rating.comment}&quot;
+                              </p>
+                            )}
+                          </div>
+                          <div className="mt-3 flex justify-between items-center text-xs text-[#557169] border-t border-[#06231f]/10 pt-2">
+                            <span>By {rating.user_name || 'Anonymous'}</span>
+                            <span>{rating.school_year}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="font-semibold text-[#557169] text-center py-6">No teacher ratings yet.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="relative border-x-4 border-[#06231f] bg-[#e9f6f1] px-5 py-16 sm:px-8">
         <div className="mx-auto max-w-4xl">
@@ -162,41 +230,62 @@ export default function Home(){
         <div className="grid gap-5 lg:grid-cols-2">
           <div className="ink-panel bg-white p-5">
             <h3 className="text-xl font-black text-[#06231f]">Most downloaded materials</h3>
-            <div className="mt-4 divide-y-2 divide-[#06231f]/10">
-              {materialRows.slice(0, 3).map((material) => (
-                <Link key={`${material.title}-${material.teacher}`} href={material.id ? `/topics/${material.id}` : '#search'} className="flex items-center justify-between gap-4 py-4">
-                  <div>
-                    <p className="font-black text-[#06231f]">{material.title}</p>
-                    <p className="mt-1 text-sm font-semibold text-[#557169]">{material.teacher} - {material.college}</p>
-                  </div>
-                  <span className="border-2 border-[#06231f] bg-[#e3f4df] px-3 py-1 text-xs font-black text-[#06231f]">{material.action}</span>
-                </Link>
-              ))}
-            </div>
+            {dbMaterials.length > 0 ? (
+              <div className="mt-4 divide-y-2 divide-[#06231f]/10">
+                {dbMaterials.slice(0, 3).map((material) => (
+                  <Link key={material.id} href={`/topics/${material.topic_id || material.id}`} className="flex items-center justify-between gap-4 py-4">
+                    <div>
+                      <p className="font-black text-[#06231f]">{material.title}</p>
+                      <p className="mt-1 text-sm font-semibold text-[#557169]">{material.teacher_name} - {material.institution}</p>
+                    </div>
+                    <span className="border-2 border-[#06231f] bg-[#e3f4df] px-3 py-1 text-xs font-black text-[#06231f]">
+                      {material.file_url ? 'Download' : 'Topic'}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-4 text-sm font-semibold text-[#557169] py-6 text-center">
+                No study materials shared yet.
+              </p>
+            )}
           </div>
 
           <div id="teachers" className="ink-panel bg-[#fffef1] p-5">
             <h3 className="text-xl font-black text-[#06231f]">Top rated part-time teachers</h3>
-            <div className="mt-4 space-y-4">
-              {teacherRows.slice(0, 3).map((teacher) => (
-                <Link key={teacher.name as string} href={`/teachers/${encodeURIComponent(String(teacher.name))}`} className="block border-2 border-[#06231f] bg-white p-4 transition hover:bg-[#e3f4df]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-black text-[#06231f]">{teacher.name}</p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {(teacher.colleges as string[]).map((college) => (
-                          <span key={college} className="rounded-full bg-[#06231f] px-2.5 py-1 text-xs font-black text-white">{college}</span>
-                        ))}
+            {dbTeachers.length > 0 ? (
+              <div className="mt-4 space-y-4">
+                {dbTeachers.slice(0, 3).map((teacher) => {
+                  const colleges = String(teacher.institutions || '').split(',').filter(Boolean).slice(0, 3)
+                  return (
+                    <Link key={teacher.name} href={`/teachers/${encodeURIComponent(teacher.name)}`} className="block border-2 border-[#06231f] bg-white p-4 transition hover:bg-[#e3f4df]">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-black text-[#06231f]">{teacher.name}</p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {colleges.map((college) => (
+                              <span key={college} className="rounded-full bg-[#06231f] px-2.5 py-1 text-xs font-black text-white">{college}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-lg font-black text-[#06231f]">
+                            {Number(teacher.rating) ? teacher.rating : 'New'}
+                          </p>
+                          <p className="text-xs font-semibold text-[#557169]">
+                            {teacher.rating_count || 0} ratings
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-lg font-black text-[#06231f]">{teacher.rating}</p>
-                      <p className="text-xs font-semibold text-[#557169]">{teacher.count}</p>
-                    </div>
-                  </div>
-                </Link>
-              ))}
-            </div>
+                    </Link>
+                  )
+                })}
+              </div>
+            ) : (
+              <p className="mt-4 text-sm font-semibold text-[#557169] py-6 text-center">
+                No instructors rated yet.
+              </p>
+            )}
           </div>
         </div>
       </section>

@@ -26,15 +26,14 @@ export default function TopicForm(){
     })
   }
 
-  function requireToken() {
-    const token = localStorage.getItem('token')
-    if (!token) {
-      localStorage.removeItem('user')
+  function checkAuth() {
+    const user = localStorage.getItem('user')
+    if (!user) {
       setError('Please log in again before submitting.')
       router.push('/auth/login')
-      return null
+      return false
     }
-    return token
+    return true
   }
 
   async function submitMaterial(e: React.FormEvent){
@@ -43,8 +42,7 @@ export default function TopicForm(){
     setIsSaving(true)
 
     try {
-      const token = requireToken()
-      if (!token) return
+      if (!checkAuth()) return
 
       const payload: any = { title, institution, course, teacher, body }
 
@@ -65,13 +63,18 @@ export default function TopicForm(){
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       })
       const data = await response.json()
 
       if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem('user')
+          setError('Session expired. Please log in again.')
+          router.push('/auth/login')
+          return
+        }
         setError(data.error || 'Could not upload material')
         return
       }
@@ -90,20 +93,24 @@ export default function TopicForm(){
     setIsSaving(true)
 
     try {
-      const token = requireToken()
-      if (!token) return
+      if (!checkAuth()) return
 
       const response = await fetch('/api/ratings', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ teacher, institution, course, schoolYear, score, comment: body }),
       })
       const data = await response.json()
 
       if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem('user')
+          setError('Session expired. Please log in again.')
+          router.push('/auth/login')
+          return
+        }
         setError(data.error || 'Could not create rating topic')
         return
       }

@@ -1,3 +1,5 @@
+import Link from 'next/link'
+
 export const universities = [
   {
     name: 'Addis Ababa University',
@@ -81,9 +83,9 @@ export default function UniversityLogos() {
         <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-[#f2fbf3] to-transparent sm:w-28" />
         <div className="college-slider flex w-max gap-4">
           {sliderItems.map((university, index) => (
-            <a
+            <Link
               key={`${university.name}-${index}`}
-              href="#search"
+              href={`/search?q=${encodeURIComponent(university.shortName)}`}
               className="group relative h-44 w-72 shrink-0 overflow-hidden border-2 border-[#06231f] bg-[#fffef1] p-5 shadow-[5px_5px_0_#06231f] transition hover:-translate-y-1 hover:shadow-[8px_8px_0_#06231f]"
             >
               <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${university.accent}`} />
@@ -111,7 +113,7 @@ export default function UniversityLogos() {
                 <span className="text-xs font-bold text-[#49645d]">Materials & teacher ratings</span>
                 <span className="text-sm font-black text-[#0d5b50]">Browse</span>
               </div>
-            </a>
+            </Link>
           ))}
         </div>
       </div>
