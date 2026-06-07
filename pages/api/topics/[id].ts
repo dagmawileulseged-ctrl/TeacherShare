@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { getDb, requireUser } from '../../../lib/db'
+import { getDb, requireUser, deleteUpload } from '../../../lib/db'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const topicId = Number(req.query.id)
@@ -167,7 +167,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       // Delete from materials if any
       if (topic.material_id) {
+        const materialResult = await db.query('SELECT file_url FROM materials WHERE id = $1', [topic.material_id])
+        const fileUrl = materialResult.rows[0]?.file_url
+        
         await db.query('DELETE FROM materials WHERE id = $1', [topic.material_id])
+        
+        if (fileUrl) {
+          await deleteUpload(fileUrl)
+        }
       }
 
       // Delete from ratings if any

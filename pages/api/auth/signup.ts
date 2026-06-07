@@ -1,5 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { createSession, getDb, hashPassword, toPublicUser } from '../../../lib/db'
+import { randomBytes } from 'node:crypto'
+import { createSession, getDb, hashPassword } from '../../../lib/db'
+import { sendEmail } from '../../../lib/email'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -9,34 +11,56 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Name, email, institute, and password are required' })
   }
 
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters long' })
+  }
+
   try {
     const db = await getDb()
+    const verificationToken = randomBytes(32).toString('hex')
+
     const result = await db.query(`
-      INSERT INTO users (name, email, institute, password_hash) 
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO users (name, email, institute, password_hash, verification_token, is_verified) 
+      VALUES ($1, $2, $3, $4, $5, FALSE)
       RETURNING id
     `, [
       String(name).trim(), 
       String(email).trim().toLowerCase(), 
       String(institute).trim(), 
-      hashPassword(String(password))
+      hashPassword(String(password)),
+      verificationToken
     ])
 
     const id = Number(result.rows[0].id)
-    const token = await createSession(id)
 
-    const isProd = process.env.NODE_ENV === 'production'
-    res.setHeader(
-      'Set-Cookie',
-      `token=${token}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax${isProd ? '; Secure' : ''}`
-    )
+    // Send verification email
+    const host = req.headers.host || 'localhost:3000'
+    const protocol = req.headers['x-forwarded-proto'] || 'http'
+    const baseUrl = `${protocol}://${host}`
+    const verifyUrl = `${baseUrl}/auth/verify-email?token=${verificationToken}`
+
+    await sendEmail({
+      to: String(email).trim().toLowerCase(),
+      subject: 'Verify your TeacherShare account',
+      html: `
+        <p>Hello ${String(name).trim()},</p>
+        <p>Thank you for registering on TeacherShare. Please verify your email address by clicking the link below:</p>
+        <p style="margin: 20px 0;"><a href="${verifyUrl}" style="background: #06231f; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold;">Verify Email Address</a></p>
+        <p>Or copy and paste this URL into your browser:</p>
+        <p style="color: #666; font-size: 13px;">${verifyUrl}</p>
+      `,
+      text: `Hello ${String(name).trim()},\n\nPlease verify your email address by visiting this link: ${verifyUrl}`,
+      baseUrl
+    })
 
     res.status(201).json({
+      message: 'Registration successful! A verification email has been sent.',
       user: { 
         id, 
         name: String(name).trim(), 
         email: String(email).trim().toLowerCase(), 
-        institute: String(institute).trim() 
+        institute: String(institute).trim(),
+        is_verified: false
       }
     })
   } catch (error: any) {
